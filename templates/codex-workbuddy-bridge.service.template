@@ -1,0 +1,13 @@
+[Unit]
+Description=Codex responses<->chat bridge for an OpenAI-compatible gateway
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=__BRIDGE_DIR__/bridge.env
+ExecStart=__NODE__ __SERVER__
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
