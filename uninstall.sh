@@ -34,23 +34,35 @@ done
 CODEX_HOME_DIR="${CODEX_HOME_DIR:-${CODEX_HOME:-$HOME/.codex}}"
 
 step "stopping the service"
+# NOTE: launchd/systemd jobs live in the *account's* service namespace, not under
+# BRIDGE_DIR, so only touch them when this installation's own unit file is present
+# under $HOME. Without this guard a sandboxed run (e.g. HOME=/tmp/x) would boot out
+# the real user's bridge because the default label is derived from $USER.
 case "$(uname -s)" in
   Darwin)
-    if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
-      launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
-      info "launchd job $LABEL booted out"
+    PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+    if [ -f "$PLIST" ]; then
+      if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
+        launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
+        info "launchd job $LABEL booted out"
+      else
+        info "launchd job $LABEL is not loaded"
+      fi
+      rm -f "$PLIST"
+      info "removed $PLIST"
     else
-      info "launchd job $LABEL is not loaded"
+      info "no launchd job for this installation ($PLIST not found) - leaving launchd alone"
     fi
-    rm -f "$HOME/Library/LaunchAgents/$LABEL.plist"
-    info "removed $HOME/Library/LaunchAgents/$LABEL.plist"
     ;;
   Linux)
-    if command -v systemctl >/dev/null 2>&1; then
+    UNIT="$HOME/.config/systemd/user/codex-workbuddy-bridge.service"
+    if command -v systemctl >/dev/null 2>&1 && [ -f "$UNIT" ]; then
       systemctl --user disable --now codex-workbuddy-bridge.service >/dev/null 2>&1 || true
-      rm -f "$HOME/.config/systemd/user/codex-workbuddy-bridge.service"
+      rm -f "$UNIT"
       systemctl --user daemon-reload >/dev/null 2>&1 || true
       info "removed the systemd --user unit"
+    else
+      info "no systemd --user unit for this installation - leaving systemd alone"
     fi
     ;;
   *)
@@ -71,7 +83,10 @@ if [ "$RESTORE" = 1 ]; then
     chmod 600 "$CODEX_HOME_DIR/config.toml"
     info "restored $NEWEST -> $CODEX_HOME_DIR/config.toml"
   else
-    info "no config.toml backup found in $CODEX_HOME_DIR"
+    warn "no config.toml backup found in $CODEX_HOME_DIR"
+    if grep -q "workbuddy (gateway via local Responses/chat bridge)" "$CODEX_HOME_DIR/config.toml" 2>/dev/null; then
+      warn "config.toml still points at this bridge; edit or delete $CODEX_HOME_DIR/config.toml by hand"
+    fi
   fi
 fi
 
